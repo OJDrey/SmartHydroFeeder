@@ -231,9 +231,22 @@ void performMeasurement(bool isAuto) {
   float d = measureDistance();
 
   if (d == 999.0 || d > 500.0 || d < 2.0) {
-    Serial.println("Measure error or out of range");
+    // Причина помилки: немає відлуння (ECHO не піднявся) або відстань поза діапазоном
+    const char* reason = (d == 999.0) ? "No echo" : (d < 2.0 ? "Too close (<2cm)" : "Too far (>5m)");
+    Serial.printf("Measure error: %s (d=%.1f)\n", reason, d);
     publishError("Sensor measure error or out of range");
-    showMainMenu();
+    if (!isAuto) {
+      // Ручний замір: показати помилку, щоб було видно, що кнопка спрацювала
+      currentScreen = SCREEN_DATA;
+      beginText();
+      display.println("SENSOR ERROR");
+      display.println();
+      display.println(reason);
+      display.println();
+      display.println("Check HC-SR04 wiring");
+      display.display();
+      dataDisplayUntil = millis() + 5000;
+    }
     if (isAuto) lastMeasure = now;
     return;
   }

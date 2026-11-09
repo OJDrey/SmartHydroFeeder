@@ -6,7 +6,7 @@
 
 | Файл | Призначення |
 |---|---|
-| `SmartHydroFeeder.ino` | Прошивка ESP32: датчик HC-SR04, OLED SSD1306, кнопка, Wi-Fi (WiFiManager), MQTT |
+| `SmartHydroFeeder/SmartHydroFeeder.ino` | Прошивка ESP32: датчик HC-SR04, OLED SSD1306, кнопка, Wi-Fi (WiFiManager), MQTT |
 | `bot_v5.py` | Telegram-бот на Python: пересилає дані з MQTT у Telegram і приймає команди |
 | `.env.example` | Шаблон налаштувань бота |
 
