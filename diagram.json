@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "author": "SmartHydroFeeder",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": 0, "left": 0, "attrs": {} },
+    { "type": "wokwi-hc-sr04", "id": "sonar", "top": -120, "left": 190, "attrs": { "distance": "5" } },
+    { "type": "board-ssd1306", "id": "oled", "top": 60, "left": 200, "attrs": { "i2cAddress": "0x3c" } },
+    { "type": "wokwi-pushbutton", "id": "btn", "top": 180, "left": 200, "attrs": { "color": "green", "bounce": "1" } }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+
+    [ "sonar:VCC", "esp:5V", "red", [] ],
+    [ "sonar:GND", "esp:GND.2", "black", [] ],
+    [ "sonar:TRIG", "esp:32", "orange", [] ],
+    [ "sonar:ECHO", "esp:35", "yellow", [] ],
+
+    [ "oled:VCC", "esp:3V3", "red", [] ],
+    [ "oled:GND", "esp:GND.2", "black", [] ],
+    [ "oled:SDA", "esp:26", "blue", [] ],
+    [ "oled:SCL", "esp:27", "green", [] ],
+
+    [ "btn:1.l", "esp:25", "purple", [] ],
+    [ "btn:2.l", "esp:GND.1", "black", [] ]
+  ],
+  "dependencies": {}
+}

@@ -334,6 +334,16 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 }
 
 void setup_wifi() {
+#ifdef WOKWI_SIM
+  // У симуляторі Wokwi немає телефона для порталу WiFiManager,
+  // тому підключаємося напряму до його віртуальної мережі.
+  WiFi.mode(WIFI_STA);
+  WiFi.begin("Wokwi-GUEST", "", 6);
+  unsigned long start = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) delay(250);
+  Serial.println(WiFi.status() == WL_CONNECTED ? "WiFi connected (Wokwi)" : "WiFi connect fail (Wokwi)");
+  return;
+#endif
   WiFiManager wm;
   wm.setConfigPortalTimeout(180);
   wm.setAPCallback(showPortalInfo);
