@@ -3,5 +3,8 @@
 *.env
 
 __pycache__/
+
+# PlatformIO і VS Code
 .pio/
+.vscode/
 build/

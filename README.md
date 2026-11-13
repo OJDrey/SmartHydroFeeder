@@ -6,7 +6,8 @@
 
 | Файл | Призначення |
 |---|---|
-| `SmartHydroFeeder/SmartHydroFeeder.ino` | Прошивка ESP32: датчик HC-SR04, OLED SSD1306, кнопка, Wi-Fi (WiFiManager), MQTT |
+| `src/main.cpp` | Прошивка ESP32: датчик HC-SR04, OLED SSD1306, кнопка, Wi-Fi (WiFiManager), MQTT |
+| `platformio.ini` | Налаштування збірки PlatformIO: плата і версії бібліотек |
 | `bot_v5.py` | Telegram-бот на Python: пересилає дані з MQTT у Telegram і приймає команди |
 | `.env.example` | Шаблон налаштувань бота |
 
@@ -24,7 +25,16 @@
 
 ## Прошивка
 
-Бібліотеки Arduino: Adafruit SSD1306, Adafruit GFX, WiFiManager (tzapu), PubSubClient, ArduinoJson. Плата: `ESP32 Dev Module`.
+Проєкт збирається в [PlatformIO](https://platformio.org/). Відкрийте цю папку у VS Code з розширенням PlatformIO IDE і натисніть **Upload** (→) на нижній панелі. Бібліотеки завантажаться самі за списком у `platformio.ini`.
+
+Те саме з терміналу:
+
+```bash
+pio run -t upload      # зібрати і прошити
+pio device monitor     # Serial Monitor, 115200
+```
+
+Якщо прошивка зависає на `Connecting...`, затисніть на платі кнопку BOOT.
 
 Після першого запуску пристрій створює точку доступу `SmartHydroFeeder`. Підключіться до неї телефоном, відкрийте `192.168.4.1` і виберіть свою мережу Wi-Fi. Щоб скинути Wi-Fi, утримуйте кнопку під час увімкнення 3 с.
 
