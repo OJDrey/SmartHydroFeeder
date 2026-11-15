@@ -62,7 +62,7 @@ void showSettings(const SensorParam& param, unsigned long timeoutMs) {
   oled.printf("%s: %.0f %s\n", param.label, *param.value, param.unit);
   oled.printf("Interval: %.1f min\n", settings.intervalMs / 60000.0f);
   oled.printf("Auto: %s\n", settings.autoEnabled ? "ON" : "OFF");
-  oled.println();
+  oled.printf("Refill: %s\n", settings.refillAuto ? "ON" : "OFF");
   oled.printf("Short: +%.0f %s\n", param.step, param.unit);
   oled.printf("Double: -%.0f %s\n", param.step, param.unit);
   oled.display();
@@ -80,6 +80,17 @@ void showReading(const LevelReading& reading) {
     oled.printf("Bottle: %.0f ml\n", settings.capacityMl);
   }
   oled.printf("Fill: %.1f %%\n", reading.percent);
+  oled.display();
+  showDataScreen();
+}
+
+void showRefill(float percent) {
+  beginText();
+  oled.println("REFILLING...");
+  oled.println();
+  oled.printf("Fill: %.1f %%\n", percent);
+  oled.println();
+  oled.println("Press button to stop");
   oled.display();
   showDataScreen();
 }

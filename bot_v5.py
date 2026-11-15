@@ -62,6 +62,18 @@ def on_connect(client, userdata, flags, rc, properties=None):  # сигнату�
     client.subscribe(f"smartfeeder/{DEVICE_ID}/alert")
     client.subscribe(f"smartfeeder/{DEVICE_ID}/error")
     client.subscribe(f"smartfeeder/{DEVICE_ID}/setting")
+    client.subscribe(f"smartfeeder/{DEVICE_ID}/refill")
+
+REFILL_MESSAGES = {
+    "started": "💧 Долив розпочато",
+    "done": "✅ Долив завершено: пляшка повна",
+    "float_stop": "✅ Долив зупинено поплавком",
+    "stopped": "⏹ Долив зупинено вручну",
+    "already_full": "ℹ️ Долив не потрібен: пляшка повна",
+    "dry_run": "🚨 Насос працює, а вода не прибуває. Перевірте резервуар! Автодолив заблоковано до /refill",
+    "timeout": "🚨 Насос працював надто довго і зупинений. Автодолив заблоковано до /refill",
+    "sensor_error": "🚨 Долив зупинено: помилка датчика рівня. Автодолив заблоковано до /refill",
+}
 
 def format_setting_message(j):
     # Підтвердження від пристрою: що саме змінилося
@@ -100,6 +112,14 @@ def on_message(client, userdata, msg):
         else:
             # Ручний замір — звичайна тривога
             bot.send_message(CHAT_ID, "🚨 Тривога\n" + text)
+
+    elif msg.topic.endswith("/refill"):
+        event = j.get("event", "?")
+        text = REFILL_MESSAGES.get(event, f"Долив: {event}")
+        level = j.get("level_percent", None)
+        if level is not None:
+            text += f"\n💧 Рівень: {level:.1f}%"
+        bot.send_message(CHAT_ID, text)
 
     elif msg.topic.endswith("/setting"):
         text = format_setting_message(j)
@@ -188,6 +208,26 @@ def calibrate_cmd(message):
         bot.reply_to(message, f"Запит на калібрування надіслано: вантаж {g:.0f} г")
     except (IndexError, ValueError):
         bot.reply_to(message, "Використання: /calibrate 200  (вага вантажу в грамах; спершу /tare)")
+
+@bot.message_handler(commands=['refill'])
+def refill_cmd(message):
+    client.publish(f"smartfeeder/{DEVICE_ID}/cmd", json.dumps({"refill": True}))
+    bot.reply_to(message, "Запит на долив надіслано")
+
+@bot.message_handler(commands=['stop'])
+def stop_cmd(message):
+    client.publish(f"smartfeeder/{DEVICE_ID}/cmd", json.dumps({"refill_stop": True}))
+    bot.reply_to(message, "Запит на зупинку насоса надіслано")
+
+@bot.message_handler(commands=['refillon'])
+def refill_on(message):
+    client.publish(f"smartfeeder/{DEVICE_ID}/cmd", json.dumps({"refill_auto": True}))
+    bot.reply_to(message, "Автодолив УВІМКНЕНО")
+
+@bot.message_handler(commands=['refilloff'])
+def refill_off(message):
+    client.publish(f"smartfeeder/{DEVICE_ID}/cmd", json.dumps({"refill_auto": False}))
+    bot.reply_to(message, "Автодолив ВИМКНЕНО")
 
 print("Telegram bot running")
 bot.polling()

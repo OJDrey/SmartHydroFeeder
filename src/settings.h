@@ -8,6 +8,7 @@ struct DeviceSettings {
   float capacityMl;          // об'єм пляшки (ваги)
   long scaleOffset;          // показ HX711 з порожньою пляшкою (тарування)
   float scaleFactor;         // відліків HX711 на грам (калібрування)
+  bool refillAuto;           // автоматичний долив насосом
 };
 
 extern DeviceSettings settings;

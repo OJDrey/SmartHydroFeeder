@@ -7,7 +7,11 @@
     { "type": "wokwi-hc-sr04", "id": "sonar", "top": -120, "left": 190, "attrs": { "distance": "5" } },
     { "type": "board-ssd1306", "id": "oled", "top": 60, "left": 200, "attrs": { "i2cAddress": "0x3c" } },
     { "type": "wokwi-pushbutton", "id": "btn", "top": 180, "left": 200, "attrs": { "color": "green", "bounce": "1" } },
-    { "type": "wokwi-hx711", "id": "scale", "top": 40, "left": -260, "attrs": { "type": "5kg" } }
+    { "type": "wokwi-hx711", "id": "scale", "top": 40, "left": -260, "attrs": { "type": "5kg" } },
+    { "type": "wokwi-led", "id": "pump", "top": 170, "left": -200, "attrs": { "color": "blue", "label": "PUMP" } },
+    { "type": "wokwi-resistor", "id": "r_pump", "top": 250, "left": -210, "attrs": { "value": "220" } },
+    { "type": "wokwi-slide-switch", "id": "float", "top": 170, "left": -110, "attrs": {} },
+    { "type": "wokwi-buzzer", "id": "buzzer", "top": 280, "left": -110, "attrs": { "volume": "0.2" } }
   ],
   "connections": [
     [ "esp:TX", "$serialMonitor:RX", "", [] ],
@@ -29,7 +33,18 @@
     [ "scale:VCC", "esp:5V", "red", [] ],
     [ "scale:GND", "esp:GND.1", "black", [] ],
     [ "scale:DT", "esp:19", "cyan", [] ],
-    [ "scale:SCK", "esp:23", "white", [] ]
+    [ "scale:SCK", "esp:23", "white", [] ],
+
+    [ "pump:A", "esp:33", "blue", [] ],
+    [ "pump:C", "r_pump:1", "black", [] ],
+    [ "r_pump:2", "esp:GND.1", "black", [] ],
+
+    [ "float:2", "esp:34", "green", [] ],
+    [ "float:1", "esp:3V3", "red", [] ],
+    [ "float:3", "esp:GND.1", "black", [] ],
+
+    [ "buzzer:2", "esp:4", "orange", [] ],
+    [ "buzzer:1", "esp:GND.1", "black", [] ]
   ],
   "serialMonitor": { "display": "terminal", "convertEol": true },
   "dependencies": {}

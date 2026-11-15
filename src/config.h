@@ -11,6 +11,9 @@ constexpr uint8_t SDA = 26;     // OLED I2C
 constexpr uint8_t SCL = 27;
 constexpr uint8_t HX711_DT = 19;   // тензодатчик
 constexpr uint8_t HX711_SCK = 23;
+constexpr uint8_t PUMP = 33;       // затвор MOSFET IRLZ44N (з резистором 10 кОм на GND)
+constexpr uint8_t FLOAT_SW = 34;   // поплавок; GPIO34 без внутрішньої підтяжки, потрібна 10 кОм на 3V3
+constexpr uint8_t BUZZER = 4;      // активний зумер
 }  // namespace Pins
 
 namespace Config {
@@ -58,6 +61,17 @@ constexpr unsigned long STATUS_LOG_MS = 5000;
 constexpr unsigned long ULTRASONIC_TIMEOUT_US = 30000;
 constexpr float ULTRASONIC_MIN_CM = 2.0f;
 constexpr float ULTRASONIC_MAX_CM = 500.0f;
+
+// Автодолив. Час роботи залежить від продуктивності насоса: уточнити на реальному залізі
+constexpr bool DEFAULT_REFILL_AUTO = false;           // з міркувань безпеки вмикається командою /refillon
+constexpr float REFILL_START_PERCENT = 20.0f;
+constexpr float REFILL_TARGET_PERCENT = 90.0f;
+constexpr unsigned long REFILL_MAX_RUN_MS = 5UL * 60UL * 1000UL;
+constexpr unsigned long REFILL_DRY_CHECK_MS = 10000;
+constexpr float REFILL_MIN_RISE_PERCENT = 1.0f;       // за 10 с рівень має зрости хоча б на 1 %
+constexpr unsigned long REFILL_COOLDOWN_MS = 10UL * 60UL * 1000UL;
+constexpr unsigned long REFILL_POLL_MS = 500;          // як часто міряти рівень під час доливу
+constexpr int FLOAT_ACTIVE_LEVEL = LOW;               // поплавок замикає на GND, коли вода вгорі
 
 // Ваги (HX711)
 constexpr float DEFAULT_CAPACITY_ML = 500.0f;

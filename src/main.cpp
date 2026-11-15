@@ -5,6 +5,8 @@
 //   level_sensor.h      інтерфейс датчика рівня
 //   ultrasonic_sensor.* HC-SR04
 //   scale_sensor.*      тензодатчик з HX711
+//   lib/refill/         автомат доливу (чиста логіка, покрита тестами)
+//   buzzer.*            зумер
 //   button.*            кнопка з антибрязкотом
 //   screen.*            екрани OLED
 //   net.*               Wi-Fi і MQTT
@@ -47,6 +49,8 @@ static void checkWifiReset() {
 
 void setup() {
   Serial.begin(115200);
+  loadSettings();
+  Feeder::begin(levelSensor);  // першим ділом вимикає насос
   levelSensor.begin();
   button.begin();
 
@@ -55,13 +59,11 @@ void setup() {
     for (;;) delay(1000);
   }
 
-  loadSettings();
   if (button.isPressed()) checkWifiReset();
 
   Screen::showMain();
   bool wifiOk = Net::connectWifi(Screen::showPortalInfo);
   Net::beginMqtt(Feeder::onMessage);
-  Feeder::begin(levelSensor);
 
   if (wifiOk) Screen::showMain();
   else Screen::showError("WiFi connect fail");

@@ -3,6 +3,9 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 
+#include <refill_controller.h>
+
+#include "buzzer.h"
 #include "config.h"
 #include "net.h"
 #include "screen.h"
@@ -10,6 +13,16 @@
 
 namespace {
 LevelSensor* sensor = nullptr;
+Buzzer buzzer(Pins::BUZZER);
+RefillController refill(RefillConfig{
+    Config::REFILL_START_PERCENT,
+    Config::REFILL_TARGET_PERCENT,
+    Config::REFILL_MAX_RUN_MS,
+    Config::REFILL_DRY_CHECK_MS,
+    Config::REFILL_MIN_RISE_PERCENT,
+    Config::REFILL_COOLDOWN_MS,
+});
+unsigned long lastRefillPoll = 0;
 unsigned long lastMeasure = 0;
 unsigned long botLastSeen = 0;
 unsigned long lastBotErrorAt = 0;
@@ -103,6 +116,99 @@ void logStatus(unsigned long now) {
                 botLastSeen == 0 ? 0UL : now - botLastSeen);
 }
 
+// ---------- Автодолив ----------
+
+bool floatHigh() { return digitalRead(Pins::FLOAT_SW) == Config::FLOAT_ACTIVE_LEVEL; }
+
+LevelSample sampleFrom(const LevelReading& r) { return {r.ok, r.percent, floatHigh()}; }
+
+const char* refillEventName(RefillEvent e) {
+  switch (e) {
+    case RefillEvent::Started: return "started";
+    case RefillEvent::Done: return "done";
+    case RefillEvent::FloatStop: return "float_stop";
+    case RefillEvent::Stopped: return "stopped";
+    case RefillEvent::AlreadyFull: return "already_full";
+    case RefillEvent::DryRun: return "dry_run";
+    case RefillEvent::Timeout: return "timeout";
+    case RefillEvent::SensorError: return "sensor_error";
+    default: return "none";
+  }
+}
+
+// Насос, екран, зумер і повідомлення в Telegram за подією автомата
+void handleRefillEvent(RefillEvent e, float percent) {
+  digitalWrite(Pins::PUMP, refill.pumpOn() ? HIGH : LOW);
+  if (e == RefillEvent::None) return;
+
+  const char* name = refillEventName(e);
+  Serial.printf("Refill: %s (%.1f %%)\n", name, percent);
+
+  JsonDocument doc;
+  addHeader(doc);
+  doc["event"] = name;
+  if (!isnan(percent)) doc["level_percent"] = percent;
+  Net::publish("refill", doc);
+
+  switch (e) {
+    case RefillEvent::Started:
+      Screen::showRefill(percent);
+      buzzer.beep(1);
+      break;
+    case RefillEvent::Done:
+      Screen::showMessage("REFILL DONE", "Bottle is full");
+      buzzer.beep(2);
+      break;
+    case RefillEvent::FloatStop:
+      Screen::showMessage("REFILL DONE", "Stopped by float");
+      buzzer.beep(2);
+      break;
+    case RefillEvent::Stopped:
+      Screen::showMessage("REFILL STOPPED", "Stopped manually");
+      buzzer.beep(1);
+      break;
+    case RefillEvent::AlreadyFull:
+      Screen::showMessage("NO REFILL", "Bottle is full");
+      break;
+    case RefillEvent::DryRun:
+      Screen::showError("Refill: reservoir empty?");
+      buzzer.beep(3, 400, 200);
+      break;
+    case RefillEvent::Timeout:
+      Screen::showError("Refill: pump timeout");
+      buzzer.beep(3, 400, 200);
+      break;
+    case RefillEvent::SensorError:
+      Screen::showError("Refill: sensor error");
+      buzzer.beep(3, 400, 200);
+      break;
+    default:
+      break;
+  }
+}
+
+// Під час доливу рівень міряється часто, а поплавок — у кожному loop()
+void pollRefill(unsigned long now) {
+  if (!refill.pumpOn()) return;
+  if (floatHigh()) {
+    LevelSample s = {false, 0.0f, true};
+    handleRefillEvent(refill.update(now, s, settings.refillAuto), NAN);
+    return;
+  }
+  if (now - lastRefillPoll < Config::REFILL_POLL_MS) return;
+  lastRefillPoll = now;
+
+  LevelReading r = sensor->read();
+  RefillEvent e = refill.update(now, sampleFrom(r), settings.refillAuto);
+  if (e == RefillEvent::None) Screen::showRefill(r.percent);
+  else handleRefillEvent(e, r.ok ? r.percent : NAN);
+}
+
+void startRefillManually() {
+  LevelReading r = sensor->read();
+  handleRefillEvent(refill.requestStart(millis(), sampleFrom(r)), r.ok ? r.percent : NAN);
+}
+
 // ---------- Команди з Telegram ----------
 
 bool handleParamCommand(JsonDocument& doc) {
@@ -177,11 +283,19 @@ void handleCommand(const uint8_t* payload, unsigned int length) {
     }
   }
 
+  if (!doc["refill_auto"].isNull()) {
+    settings.refillAuto = doc["refill_auto"].as<bool>();
+    Serial.printf("Auto refill: %s\n", settings.refillAuto ? "ON" : "OFF");
+    changed = true;
+  }
+
   if (changed) {
     saveSettings();
     Screen::showSettings(sensor->param(), Config::SETTINGS_SCREEN_AFTER_MQTT_MS);
   }
 
+  if (doc["refill_stop"] == true) handleRefillEvent(refill.stop(millis()), NAN);
+  if (doc["refill"] == true) startRefillManually();
   if (doc["tare"] == true) handleTare();
   if (!doc["calibrate_g"].isNull()) handleCalibrate(doc["calibrate_g"].as<float>());
   if (doc["measure"] == true) Feeder::measure(false);
@@ -192,8 +306,13 @@ namespace Feeder {
 
 void begin(LevelSensor& levelSensor) {
   sensor = &levelSensor;
+  // Насос вимикаємо найпершим: до цього пін "висить", і затвор тримає лише резистор на GND
+  pinMode(Pins::PUMP, OUTPUT);
+  digitalWrite(Pins::PUMP, LOW);
+  pinMode(Pins::FLOAT_SW, INPUT);
   pinMode(Pins::LED, OUTPUT);
   digitalWrite(Pins::LED, LOW);
+  buzzer.begin();
   lastMeasure = millis();
 }
 
@@ -212,6 +331,7 @@ void measure(bool isAuto) {
 
   Serial.printf("Measure: Fill=%.1f %% (isAuto=%d)\n", r.percent, isAuto);
   bool low = r.percent < Config::LOW_WATER_PERCENT;
+  RefillEvent refillEvent = refill.update(now, sampleFrom(r), settings.refillAuto);
 
   if (isAuto) {
     // Автозамір не заважає користувачу: екран змінюється лише при нестачі води
@@ -229,9 +349,17 @@ void measure(bool isAuto) {
       blinkLed();
     }
   }
+
+  handleRefillEvent(refillEvent, r.percent);  // після екрана заміру, щоб показати долив
 }
 
 void onButton(ButtonEvent event, unsigned long now) {
+  // Будь-яке натискання під час доливу зупиняє насос
+  if (refill.pumpOn()) {
+    handleRefillEvent(refill.stop(now), NAN);
+    return;
+  }
+
   bool inSettings = Screen::mode() == Screen::Mode::Settings;
 
   if (event == ButtonEvent::LongPress) {
@@ -276,6 +404,8 @@ void loop(unsigned long now) {
 
   if (settings.autoEnabled && now - lastMeasure >= settings.intervalMs) measure(true);
 
+  pollRefill(now);
+  buzzer.update(now);
   checkBot(now);
   logStatus(now);
 }
