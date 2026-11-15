@@ -25,5 +25,6 @@
     [ "btn:1.l", "esp:25", "purple", [] ],
     [ "btn:2.l", "esp:GND.1", "black", [] ]
   ],
+  "serialMonitor": { "display": "terminal", "convertEol": true },
   "dependencies": {}
 }
