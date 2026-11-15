@@ -1,15 +1,28 @@
+"""Telegram-бот SmartHydroFeeder.
+
+Пересилає повідомлення пристрою з MQTT у Telegram, приймає команди власника,
+зберігає всі виміри в SQLite і будує статистику споживання води (/stats).
+"""
+import json
+import logging
+import os
+import sys
+import threading
+import time
+from datetime import datetime
+from functools import wraps
+
 import paho.mqtt.client as mqtt
 import telebot
-import json
-import time
-import threading
-import os
+
+from bot_storage import Storage, compute_stats, format_stats, render_chart
 
 # Секрети читаються з файлу .env поруч зі скриптом (або зі змінних середовища).
 # Шаблон: .env.example. Сам .env не можна нікуди викладати.
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 try:
     from dotenv import load_dotenv
-    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+    load_dotenv(os.path.join(BASE_DIR, ".env"))
 except ImportError:
     pass  # python-dotenv не встановлено: беремо лише змінні середовища
 
@@ -17,11 +30,28 @@ TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 DEVICE_ID = os.environ.get("DEVICE_ID", "device123")
 MQTT_SERVER = os.environ.get("MQTT_SERVER", "broker.hivemq.com")
+DB_PATH = os.environ.get("DB_PATH", os.path.join(BASE_DIR, "smarthydrofeeder.db"))
 
 if not TOKEN or not CHAT_ID:
     raise SystemExit("Не задано TELEGRAM_TOKEN або TELEGRAM_CHAT_ID (див. .env.example)")
 
+# Керувати пристроєм можуть лише власник (TELEGRAM_CHAT_ID) і чати з ALLOWED_CHAT_IDS (через кому)
+ALLOWED_CHATS = {CHAT_ID.strip()} | {
+    c.strip() for c in os.environ.get("ALLOWED_CHAT_IDS", "").split(",") if c.strip()
+}
+
+TOPIC = f"smartfeeder/{DEVICE_ID}"
+
+# Консоль Windows за замовчуванням у cp1251 і не може вивести емодзі з повідомлень
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, "reconfigure"):
+        stream.reconfigure(encoding="utf-8", errors="replace")
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger("bot")
+
 bot = telebot.TeleBot(TOKEN)
+storage = Storage(DB_PATH)
 
 # paho-mqtt 2.x вимагає явно вказати версію API колбеків, 1.x такого параметра не має
 try:
@@ -29,51 +59,73 @@ try:
 except AttributeError:
     client = mqtt.Client()
 
+
+# ---------- Допоміжне ----------
+
+def send(text):
+    """Повідомлення власнику. Помилка мережі Telegram не повинна зупиняти потік MQTT."""
+    try:
+        bot.send_message(CHAT_ID, text)
+    except Exception as e:  # telebot кидає різні винятки мережі та API
+        log.warning("Не вдалося надіслати повідомлення: %s", e)
+
+
+def publish_cmd(payload):
+    client.publish(f"{TOPIC}/cmd", json.dumps(payload))
+
+
+def event_time(j):
+    """Час події: від пристрою (NTP), а якщо пристрій ще не синхронізував годинник — час отримання."""
+    ts = j.get("timestamp")
+    return int(ts) if isinstance(ts, (int, float)) and ts > 1_700_000_000 else int(time.time())
+
+
+def fmt_time(ts):
+    return datetime.fromtimestamp(ts).strftime("%d.%m.%Y %H:%M")
+
+
+def owner_only(handler):
+    """Команди виконуються лише для дозволених чатів."""
+    @wraps(handler)
+    def wrapper(message):
+        if str(message.chat.id) not in ALLOWED_CHATS:
+            log.warning("Відхилено команду з чату %s: %s", message.chat.id, message.text)
+            bot.reply_to(message, "⛔ Доступ заборонено")
+            return
+        handler(message)
+    return wrapper
+
+
+def command_arg(message, cast=float):
+    """Перший аргумент команди або None, якщо його немає чи він некоректний."""
+    parts = message.text.split()
+    if len(parts) < 2:
+        return None
+    try:
+        return cast(parts[1].replace(",", "."))
+    except ValueError:
+        return None
+
+
+# ---------- Повідомлення від пристрою ----------
+
 def format_measure_message(j):
-    dev = j.get("device_id", "?")
-    dist = j.get("dist_cm", None)
-    level = j.get("level_percent", None)
-    height = j.get("height_cm", None)
-    volume = j.get("volume_ml", None)
-    capacity = j.get("capacity_ml", None)
-    low = j.get("low_water", False)
-    ts = j.get("timestamp", None)
-    lines = []
-    lines.append(f"📡 Device: {dev}")
-    if dist is not None:
-        lines.append(f"📏 Дистанція між водою та датчиком: {dist:.1f} cm")
-    if height is not None:
-        lines.append(f"📐 Висота пляшки: {height:.1f} cm")
-    if volume is not None:
-        lines.append(f"🥤 Води в пляшці: {volume:.0f} мл")
-    if capacity is not None:
-        lines.append(f"📐 Об'єм пляшки: {capacity:.0f} мл")
-    if level is not None:
-        lines.append(f"💧 Рівень заповнення: {level:.1f}%")
-    if low:
+    lines = [f"📡 Пристрій: {j.get('device_id', '?')}"]
+    if j.get("dist_cm") is not None:
+        lines.append(f"📏 Відстань від датчика до води: {j['dist_cm']:.1f} см")
+    if j.get("height_cm") is not None:
+        lines.append(f"📐 Висота пляшки: {j['height_cm']:.1f} см")
+    if j.get("volume_ml") is not None:
+        lines.append(f"🥤 Води в пляшці: {j['volume_ml']:.0f} мл")
+    if j.get("capacity_ml") is not None:
+        lines.append(f"📐 Об'єм пляшки: {j['capacity_ml']:.0f} мл")
+    if j.get("level_percent") is not None:
+        lines.append(f"💧 Рівень заповнення: {j['level_percent']:.1f}%")
+    if j.get("low_water"):
         lines.append("⚠️ Низький рівень води!")
-    if ts is not None:
-        lines.append(f"⏱ {ts}")
+    lines.append(f"⏱ {fmt_time(event_time(j))}")
     return "\n".join(lines)
 
-def on_connect(client, userdata, flags, rc, properties=None):  # сигнатура підходить і для paho 1.x, і для 2.x
-    print("MQTT connected", rc)
-    client.subscribe(f"smartfeeder/{DEVICE_ID}/measure")
-    client.subscribe(f"smartfeeder/{DEVICE_ID}/alert")
-    client.subscribe(f"smartfeeder/{DEVICE_ID}/error")
-    client.subscribe(f"smartfeeder/{DEVICE_ID}/setting")
-    client.subscribe(f"smartfeeder/{DEVICE_ID}/refill")
-
-REFILL_MESSAGES = {
-    "started": "💧 Долив розпочато",
-    "done": "✅ Долив завершено: пляшка повна",
-    "float_stop": "✅ Долив зупинено поплавком",
-    "stopped": "⏹ Долив зупинено вручну",
-    "already_full": "ℹ️ Долив не потрібен: пляшка повна",
-    "dry_run": "🚨 Насос працює, а вода не прибуває. Перевірте резервуар! Автодолив заблоковано до /refill",
-    "timeout": "🚨 Насос працював надто довго і зупинений. Автодолив заблоковано до /refill",
-    "sensor_error": "🚨 Долив зупинено: помилка датчика рівня. Автодолив заблоковано до /refill",
-}
 
 def format_setting_message(j):
     # Підтвердження від пристрою: що саме змінилося
@@ -87,147 +139,240 @@ def format_setting_message(j):
         return f"⚙️ Об'єм пляшки змінено: {j['set_capacity_ml']:.0f} мл"
     return None
 
+
+REFILL_MESSAGES = {
+    "started": "💧 Долив розпочато",
+    "done": "✅ Долив завершено: пляшка повна",
+    "float_stop": "✅ Долив зупинено поплавком",
+    "stopped": "⏹ Долив зупинено вручну",
+    "already_full": "ℹ️ Долив не потрібен: пляшка повна",
+    "dry_run": "🚨 Насос працює, а вода не прибуває. Перевірте резервуар! Автодолив заблоковано до /refill",
+    "timeout": "🚨 Насос працював надто довго і зупинений. Автодолив заблоковано до /refill",
+    "sensor_error": "🚨 Долив зупинено: помилка датчика рівня. Автодолив заблоковано до /refill",
+}
+
+
+SUBTOPICS = ("measure", "alert", "error", "setting", "refill")
+
+
+def on_connect(client, userdata, flags, rc, properties=None):  # сигнатура підходить і для paho 1.x, і для 2.x
+    log.info("MQTT connected: %s", rc)
+    # Старі версії прошивки і бота публікували retained-повідомлення, і брокер досі віддає їх
+    # кожному новому підписнику. Порожнє retained-повідомлення видаляє збережену копію.
+    for sub in SUBTOPICS + ("bot",):
+        client.publish(f"{TOPIC}/{sub}", b"", retain=True)
+    for sub in SUBTOPICS:
+        client.subscribe(f"{TOPIC}/{sub}")
+
+
 def on_message(client, userdata, msg):
-    payload = msg.payload.decode()
-    print("MQTT msg:", msg.topic, payload)
-    try:
-        j = json.loads(payload)
-    except:
-        bot.send_message(CHAT_ID, f"Raw MQTT: {payload}")
+    # Retained-повідомлення — це збережена брокером стара копія, а не нова подія
+    if msg.retain or not msg.payload:
         return
+    try:
+        payload = msg.payload.decode("utf-8")
+        j = json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        log.warning("Некоректне повідомлення в %s: %r", msg.topic, msg.payload[:200])
+        return
+    if not isinstance(j, dict):
+        return
+    log.info("MQTT %s %s", msg.topic, payload)
 
-    if msg.topic.endswith("/measure"):
-        # /measure надходить лише при ручному вимірюванні — завжди показуємо
-        text = format_measure_message(j)
-        bot.send_message(CHAT_ID, text)
+    kind = msg.topic.rsplit("/", 1)[-1]
+    device = j.get("device_id", DEVICE_ID)
+    ts = event_time(j)
 
-    elif msg.topic.endswith("/alert"):
-        # Alert надходить і при авто (тільки якщо низький рівень), і при ручному
-        triggered_by = j.get("triggered_by", "manual")
-        text = format_measure_message(j)
+    try:
+        if kind == "measure":
+            storage.add_measurement(ts, device, j.get("source"), j.get("volume_ml"),
+                                    j.get("level_percent"), j.get("dist_cm"))
+            # Автоматичні заміри лише зберігаються, щоб не засипати чат повідомленнями
+            if j.get("source") != "auto":
+                send(format_measure_message(j))
 
-        if triggered_by == "auto":
-            # Автоматичний замір виявив низький рівень
-            bot.send_message(CHAT_ID, "🚨 Автоматичний замір: низький рівень води!\n" + text)
-        else:
-            # Ручний замір — звичайна тривога
-            bot.send_message(CHAT_ID, "🚨 Тривога\n" + text)
+        elif kind == "alert":
+            storage.add_event(ts, device, "alert", j.get("triggered_by"))
+            title = "🚨 Автоматичний замір: низький рівень води!" if j.get("triggered_by") == "auto" else "🚨 Тривога"
+            send(title + "\n" + format_measure_message(j))
 
-    elif msg.topic.endswith("/refill"):
-        event = j.get("event", "?")
-        text = REFILL_MESSAGES.get(event, f"Долив: {event}")
-        level = j.get("level_percent", None)
-        if level is not None:
-            text += f"\n💧 Рівень: {level:.1f}%"
-        bot.send_message(CHAT_ID, text)
+        elif kind == "refill":
+            event = j.get("event", "?")
+            storage.add_event(ts, device, "refill", event)
+            text = REFILL_MESSAGES.get(event, f"Долив: {event}")
+            if j.get("level_percent") is not None:
+                text += f"\n💧 Рівень: {j['level_percent']:.1f}%"
+            send(text)
 
-    elif msg.topic.endswith("/setting"):
-        text = format_setting_message(j)
-        if text:
-            bot.send_message(CHAT_ID, text)
+        elif kind == "setting":
+            text = format_setting_message(j)
+            if text:
+                send(text)
 
-    elif msg.topic.endswith("/error"):
-        err = j.get("error", "Unknown error")
-        dev = j.get("device_id", DEVICE_ID)
-        ts = j.get("timestamp", None)
-        text = f"❗️ Error from {dev}:\n{err}"
-        if ts:
-            text += f"\n⏱ {ts}"
-        bot.send_message(CHAT_ID, text)
+        elif kind == "error":
+            err = j.get("error", "Unknown error")
+            storage.add_event(ts, device, "error", err)
+            send(f"❗️ Помилка пристрою {device}:\n{err}\n⏱ {fmt_time(ts)}")
+    except Exception:
+        # Збій обробки одного повідомлення не повинен зупиняти отримання наступних
+        log.exception("Помилка обробки повідомлення %s", msg.topic)
+
 
 client.on_connect = on_connect
 client.on_message = on_message
 client.connect(MQTT_SERVER, 1883, 60)
 client.loop_start()
 
+
 def heartbeat_loop():
     while True:
-        try:
-            payload = json.dumps({"bot": "online", "timestamp": int(time.time())})
-            client.publish(f"smartfeeder/{DEVICE_ID}/bot", payload, retain=True)
-            print("Heartbeat ->", f"smartfeeder/{DEVICE_ID}/bot", payload)
-        except Exception as e:
-            print("Heartbeat publish error:", e)
+        payload = json.dumps({"bot": "online", "timestamp": int(time.time())})
+        # Не retained: інакше пристрій отримував би "бот онлайн" від брокера навіть коли бот вимкнений
+        result = client.publish(f"{TOPIC}/bot", payload)
+        if result.rc != mqtt.MQTT_ERR_SUCCESS:
+            log.warning("Heartbeat не надіслано, rc=%s", result.rc)
         time.sleep(10)
 
-hb_thread = threading.Thread(target=heartbeat_loop, daemon=True)
-hb_thread.start()
 
-@bot.message_handler(commands=['measure'])
+threading.Thread(target=heartbeat_loop, daemon=True).start()
+
+
+# ---------- Команди ----------
+
+HELP = """Команди SmartHydroFeeder:
+/measure — виміряти рівень зараз
+/stats — споживання за тиждень, /stats day — за добу
+/refill — долити зараз, /stop — зупинити насос
+/refillon, /refilloff — автодолив
+/autoon, /autooff — автоматичні заміри
+/interval 10 — інтервал замірів, хв
+/capacity 500 — об'єм пляшки, мл (ваги)
+/setheight 20 — висота пляшки, см (ультразвук)
+/tare, /calibrate 200 — налаштування ваг"""
+
+
+@bot.message_handler(commands=["start", "help"])
+@owner_only
+def help_cmd(message):
+    bot.reply_to(message, HELP)
+
+
+@bot.message_handler(commands=["measure"])
+@owner_only
 def measure(message):
-    client.publish(f"smartfeeder/{DEVICE_ID}/cmd", json.dumps({"measure": True}))
-    bot.reply_to(message, "Запит на вимірювання відправлено")
+    publish_cmd({"measure": True})
+    bot.reply_to(message, "Запит на вимірювання надіслано")
 
-@bot.message_handler(commands=['setheight'])
+
+@bot.message_handler(commands=["stats"])
+@owner_only
+def stats_cmd(message):
+    period = "day" if "day" in message.text.lower() or "доб" in message.text.lower() else "week"
+    seconds = 86400 if period == "day" else 7 * 86400
+    rows = storage.measurements(DEVICE_ID, time.time() - seconds)
+    stats = compute_stats(rows, period, datetime.now())
+    text = format_stats(stats)
+    chart = render_chart(stats) if stats.samples >= 2 else None
+    if chart:
+        bot.send_photo(message.chat.id, chart, caption=text)
+    else:
+        bot.reply_to(message, text)
+
+
+@bot.message_handler(commands=["setheight"])
+@owner_only
 def set_height(message):
-    try:
-        h = float(message.text.split()[1])
-        client.publish(f"smartfeeder/{DEVICE_ID}/cmd", json.dumps({"set_height": h}))
-        bot.reply_to(message, f"Висота встановлена: {h} см")
-    except:
+    h = command_arg(message)
+    if h is None:
         bot.reply_to(message, "Використання: /setheight 20.0")
+        return
+    publish_cmd({"set_height": h})
+    bot.reply_to(message, f"Запит надіслано: висота {h} см")
 
-@bot.message_handler(commands=['autoon'])
+
+@bot.message_handler(commands=["autoon"])
+@owner_only
 def auto_on(message):
-    client.publish(f"smartfeeder/{DEVICE_ID}/cmd", json.dumps({"auto_enabled": True}))
+    publish_cmd({"auto_enabled": True})
     bot.reply_to(message, "Автоматичні вимірювання УВІМКНЕНО")
 
-@bot.message_handler(commands=['autooff'])
+
+@bot.message_handler(commands=["autooff"])
+@owner_only
 def auto_off(message):
-    client.publish(f"smartfeeder/{DEVICE_ID}/cmd", json.dumps({"auto_enabled": False}))
+    publish_cmd({"auto_enabled": False})
     bot.reply_to(message, "Автоматичні вимірювання ВИМКНЕНО")
 
-@bot.message_handler(commands=['interval'])
+
+@bot.message_handler(commands=["interval"])
+@owner_only
 def interval_cmd(message):
-    try:
-        m = float(message.text.split()[1])
-        client.publish(f"smartfeeder/{DEVICE_ID}/cmd", json.dumps({"set_interval_min": m}))
-        bot.reply_to(message, f"Інтервал встановлено: {m} хв")
-    except:
+    m = command_arg(message)
+    if m is None:
         bot.reply_to(message, "Використання: /interval 10  (в хвилинах)")
+        return
+    publish_cmd({"set_interval_min": m})
+    bot.reply_to(message, f"Запит надіслано: інтервал {m} хв")
 
-@bot.message_handler(commands=['capacity'])
+
+@bot.message_handler(commands=["capacity"])
+@owner_only
 def capacity_cmd(message):
-    try:
-        ml = float(message.text.split()[1])
-        client.publish(f"smartfeeder/{DEVICE_ID}/cmd", json.dumps({"set_capacity_ml": ml}))
-        bot.reply_to(message, f"Запит надіслано: об'єм пляшки {ml:.0f} мл")
-    except (IndexError, ValueError):
+    ml = command_arg(message)
+    if ml is None:
         bot.reply_to(message, "Використання: /capacity 500  (в мілілітрах)")
+        return
+    publish_cmd({"set_capacity_ml": ml})
+    bot.reply_to(message, f"Запит надіслано: об'єм пляшки {ml:.0f} мл")
 
-@bot.message_handler(commands=['tare'])
+
+@bot.message_handler(commands=["tare"])
+@owner_only
 def tare_cmd(message):
-    client.publish(f"smartfeeder/{DEVICE_ID}/cmd", json.dumps({"tare": True}))
+    publish_cmd({"tare": True})
     bot.reply_to(message, "Запит на тарування надіслано. На вагах має стояти ПОРОЖНЯ пляшка")
 
-@bot.message_handler(commands=['calibrate'])
-def calibrate_cmd(message):
-    try:
-        g = float(message.text.split()[1])
-        client.publish(f"smartfeeder/{DEVICE_ID}/cmd", json.dumps({"calibrate_g": g}))
-        bot.reply_to(message, f"Запит на калібрування надіслано: вантаж {g:.0f} г")
-    except (IndexError, ValueError):
-        bot.reply_to(message, "Використання: /calibrate 200  (вага вантажу в грамах; спершу /tare)")
 
-@bot.message_handler(commands=['refill'])
+@bot.message_handler(commands=["calibrate"])
+@owner_only
+def calibrate_cmd(message):
+    g = command_arg(message)
+    if g is None:
+        bot.reply_to(message, "Використання: /calibrate 200  (вага вантажу в грамах; спершу /tare)")
+        return
+    publish_cmd({"calibrate_g": g})
+    bot.reply_to(message, f"Запит на калібрування надіслано: вантаж {g:.0f} г")
+
+
+@bot.message_handler(commands=["refill"])
+@owner_only
 def refill_cmd(message):
-    client.publish(f"smartfeeder/{DEVICE_ID}/cmd", json.dumps({"refill": True}))
+    publish_cmd({"refill": True})
     bot.reply_to(message, "Запит на долив надіслано")
 
-@bot.message_handler(commands=['stop'])
+
+@bot.message_handler(commands=["stop"])
+@owner_only
 def stop_cmd(message):
-    client.publish(f"smartfeeder/{DEVICE_ID}/cmd", json.dumps({"refill_stop": True}))
+    publish_cmd({"refill_stop": True})
     bot.reply_to(message, "Запит на зупинку насоса надіслано")
 
-@bot.message_handler(commands=['refillon'])
+
+@bot.message_handler(commands=["refillon"])
+@owner_only
 def refill_on(message):
-    client.publish(f"smartfeeder/{DEVICE_ID}/cmd", json.dumps({"refill_auto": True}))
+    publish_cmd({"refill_auto": True})
     bot.reply_to(message, "Автодолив УВІМКНЕНО")
 
-@bot.message_handler(commands=['refilloff'])
+
+@bot.message_handler(commands=["refilloff"])
+@owner_only
 def refill_off(message):
-    client.publish(f"smartfeeder/{DEVICE_ID}/cmd", json.dumps({"refill_auto": False}))
+    publish_cmd({"refill_auto": False})
     bot.reply_to(message, "Автодолив ВИМКНЕНО")
 
-print("Telegram bot running")
-bot.polling()
+
+if __name__ == "__main__":
+    log.info("Telegram bot running, база даних: %s", DB_PATH)
+    # infinity_polling сам перепідключається після збоїв мережі, на відміну від polling()
+    bot.infinity_polling(timeout=20, long_polling_timeout=20)

@@ -1,6 +1,7 @@
 // Піни та константи пристрою. Усі "магічні числа" прошивки зібрані тут.
 #pragma once
 #include <Arduino.h>
+#include <time.h>
 
 namespace Pins {
 constexpr uint8_t TRIG = 32;    // HC-SR04 TRIG
@@ -26,6 +27,9 @@ constexpr const char* TOPIC_ROOT = "smartfeeder";  // топіки: smartfeeder/
 constexpr unsigned long WIFI_RETRY_MS = 30000;
 constexpr unsigned long MQTT_RETRY_MS = 5000;
 constexpr unsigned long PORTAL_TIMEOUT_S = 180;
+constexpr const char* NTP_SERVER_1 = "pool.ntp.org";
+constexpr const char* NTP_SERVER_2 = "time.google.com";
+constexpr time_t MIN_VALID_EPOCH = 1700000000;  // до синхронізації ESP32 показує 1970 рік
 
 // Дисплей SSD1306
 constexpr uint8_t SCREEN_WIDTH = 128;
@@ -53,6 +57,7 @@ constexpr float INTERVAL_MAX_MIN = 10080.0f;  // тиждень
 
 // Логіка поїлки
 constexpr float LOW_WATER_PERCENT = 20.0f;
+constexpr float LOW_WATER_HYSTERESIS = 5.0f;  // нове сповіщення лише після підйому вище 25 %
 constexpr unsigned long BOT_TIMEOUT_MS = 120000;
 constexpr unsigned long BOT_ERROR_REPEAT_MS = 15000;
 constexpr unsigned long STATUS_LOG_MS = 5000;

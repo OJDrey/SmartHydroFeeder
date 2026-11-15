@@ -99,11 +99,19 @@ pio device monitor     # Serial Monitor, 115200
 ## Telegram-бот
 
 ```bash
-pip install pyTelegramBotAPI paho-mqtt python-dotenv
+py -m pip install -r requirements.txt
 cp .env.example .env   # вписати токен від @BotFather і свій chat_id
-python bot_v5.py
+py bot_v5.py
 ```
 
-Команди: `/measure`, `/setheight 20`, `/autoon`, `/autooff`, `/interval 10`, для ваг `/tare`, `/calibrate 200`, `/capacity 500`, для доливу `/refill`, `/stop`, `/refillon`, `/refilloff`.
+Команди: `/help`, `/measure`, `/stats` (тиждень) і `/stats day` (доба), `/setheight 20`, `/autoon`, `/autooff`, `/interval 10`, для ваг `/tare`, `/calibrate 200`, `/capacity 500`, для доливу `/refill`, `/stop`, `/refillon`, `/refilloff`.
 
-Файл `.env` містить секрети і в репозиторій не потрапляє.
+- **Доступ:** бот виконує команди лише з чату `TELEGRAM_CHAT_ID` (і з `ALLOWED_CHAT_IDS` через кому, якщо задано).
+- **Історія:** усі виміри (і автоматичні, і ручні) та події доливу записуються в SQLite (`smarthydrofeeder.db`, шлях змінюється через `DB_PATH`). У чат пишуться лише ручні заміри, сповіщення і події.
+- **Аналітика:** `bot_storage.py` рахує споживання як суму зменшень об'єму відносно опорного значення. Долив і шум до 2 мл не рахуються, а повільне зменшення між замірами накопичується. `/stats` надсилає графік споживання за годинами (доба) або днями (тиждень) і середнє за добу.
+- **Час:** пристрій синхронізує годинник через NTP і надсилає Unix-час; поки час не синхронізовано, бот бере час отримання повідомлення.
+- **Сповіщення про низький рівень** надсилається один раз при падінні нижче 20 % і знову лише після підйому вище 25 %.
+
+Тести аналітики: `py -m unittest test_bot_storage`
+
+Файл `.env` містить секрети, а база — історію вимірювань; обидва в репозиторій не потрапляють.

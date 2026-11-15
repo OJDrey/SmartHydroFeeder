@@ -91,6 +91,16 @@ void beginMqtt(MessageHandler handler) {
   mqtt.setCallback(onMqttMessage);
 }
 
+void beginClock() {
+  // Час у UTC; у місцевий його переводить бот
+  configTime(0, 0, Config::NTP_SERVER_1, Config::NTP_SERVER_2);
+}
+
+uint32_t epochTime() {
+  time_t now = time(nullptr);
+  return now > Config::MIN_VALID_EPOCH ? (uint32_t)now : 0;
+}
+
 void loop() {
   maintainWifi();
   if (WiFi.status() != WL_CONNECTED) return;

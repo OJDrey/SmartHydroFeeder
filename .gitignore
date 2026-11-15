@@ -4,6 +4,9 @@
 
 __pycache__/
 
+# База вимірювань бота (особисті дані, росте з часом)
+*.db
+
 # PlatformIO і VS Code
 .pio/
 .vscode/

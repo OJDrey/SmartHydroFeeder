@@ -64,6 +64,7 @@ void setup() {
   Screen::showMain();
   bool wifiOk = Net::connectWifi(Screen::showPortalInfo);
   Net::beginMqtt(Feeder::onMessage);
+  Net::beginClock();
 
   if (wifiOk) Screen::showMain();
   else Screen::showError("WiFi connect fail");

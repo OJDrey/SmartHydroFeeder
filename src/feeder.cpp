@@ -36,7 +36,9 @@ const char* const PARAM_KEYS[] = {"set_height", "set_capacity_ml"};
 
 void addHeader(JsonDocument& doc) {
   doc["device_id"] = Config::DEVICE_ID;
-  doc["timestamp"] = millis() / 1000;  // секунди від увімкнення
+  uint32_t epoch = Net::epochTime();
+  if (epoch) doc["timestamp"] = epoch;  // Unix-час UTC; без NTP поле відсутнє, бот бере час отримання
+  doc["uptime_s"] = millis() / 1000;
 }
 
 void addReading(JsonDocument& doc, const LevelReading& r) {
@@ -68,10 +70,27 @@ void publishParam(const SensorParam& p) {
   Net::publish("setting", doc);
 }
 
-void publishMeasurement(const LevelReading& r) {
+void publishMeasurement(const LevelReading& r, bool isAuto) {
   JsonDocument doc;
   addReading(doc, r);
+  doc["source"] = isAuto ? "auto" : "manual";  // бот пише в чат лише ручні заміри, а зберігає всі
   Net::publish("measure", doc);
+}
+
+// Сповіщення про низький рівень надсилається один раз при переході вниз через поріг,
+// а не на кожному замірі; знову "озброюється", коли рівень піднявся вище порогу + гістерезис.
+bool lowAlertSent = false;
+
+void publishLowWaterAlert(const LevelReading& r, bool isAuto);
+
+void updateLowAlert(const LevelReading& r, bool isAuto) {
+  if (r.percent >= Config::LOW_WATER_PERCENT + Config::LOW_WATER_HYSTERESIS) {
+    lowAlertSent = false;
+    return;
+  }
+  if (r.percent >= Config::LOW_WATER_PERCENT || lowAlertSent) return;
+  lowAlertSent = true;
+  publishLowWaterAlert(r, isAuto);
 }
 
 void publishLowWaterAlert(const LevelReading& r, bool isAuto) {
@@ -335,20 +354,14 @@ void measure(bool isAuto) {
 
   if (isAuto) {
     // Автозамір не заважає користувачу: екран змінюється лише при нестачі води
-    if (low) {
-      Screen::showLowWater(r.percent);
-      publishLowWaterAlert(r, true);
-      blinkLed();
-    }
+    if (low) Screen::showLowWater(r.percent);
     lastMeasure = now;
   } else {
     Screen::showReading(r);
-    publishMeasurement(r);
-    if (low) {
-      publishLowWaterAlert(r, false);
-      blinkLed();
-    }
   }
+  if (low) blinkLed();
+  publishMeasurement(r, isAuto);
+  updateLowAlert(r, isAuto);
 
   handleRefillEvent(refillEvent, r.percent);  // після екрана заміру, щоб показати долив
 }

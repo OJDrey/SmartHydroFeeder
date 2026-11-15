@@ -12,6 +12,8 @@ using MessageHandler = void (*)(const char* subtopic, const uint8_t* payload, un
 // налаштування, і викликається onPortalStart. Повертає false, якщо не вдалося.
 bool connectWifi(void (*onPortalStart)());
 void beginMqtt(MessageHandler handler);
+void beginClock();             // синхронізація часу через NTP (у фоні, щойно з'явиться мережа)
+uint32_t epochTime();          // Unix-час у секундах (UTC); 0, якщо час ще не синхронізовано
 void loop();  // підтримка зв'язку, викликати в кожному loop()
 
 bool wifiConnected();
