@@ -90,7 +90,9 @@ void updateLowAlert(const LevelReading& r, bool isAuto) {
   }
   if (r.percent >= Config::LOW_WATER_PERCENT || lowAlertSent) return;
   lowAlertSent = true;
-  publishLowWaterAlert(r, isAuto);
+  // Ручний замір користувач уже бачить разом із попередженням "Низький рівень",
+  // тому окреме сповіщення надсилається лише для автоматичних замірів
+  if (isAuto) publishLowWaterAlert(r, true);
 }
 
 void publishLowWaterAlert(const LevelReading& r, bool isAuto) {

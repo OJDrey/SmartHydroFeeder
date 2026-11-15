@@ -3,6 +3,11 @@
 #include <Arduino.h>
 #include <time.h>
 
+// Облікові дані брокера (див. secrets.example.h). Файла немає — працюємо з відкритим брокером.
+#if __has_include("secrets.h")
+#include "secrets.h"
+#endif
+
 namespace Pins {
 constexpr uint8_t TRIG = 32;    // HC-SR04 TRIG
 constexpr uint8_t ECHO = 35;    // HC-SR04 ECHO (через дільник 1 кОм / 2 кОм)
@@ -21,8 +26,21 @@ namespace Config {
 // Мережа
 constexpr const char* DEVICE_ID = "device123";
 constexpr const char* AP_NAME = "SmartHydroFeeder";
+#ifdef SECRET_MQTT_HOST
+// Хмарний брокер: TLS (порт 8883) і вхід за логіном і паролем
+constexpr const char* MQTT_SERVER = SECRET_MQTT_HOST;
+constexpr uint16_t MQTT_PORT = SECRET_MQTT_PORT;
+constexpr bool MQTT_USE_TLS = true;
+constexpr const char* MQTT_USER = SECRET_MQTT_USER;
+constexpr const char* MQTT_PASS = SECRET_MQTT_PASS;
+#else
+// Відкритий публічний брокер (лише для розробки): без шифрування і пароля
 constexpr const char* MQTT_SERVER = "broker.hivemq.com";
 constexpr uint16_t MQTT_PORT = 1883;
+constexpr bool MQTT_USE_TLS = false;
+constexpr const char* MQTT_USER = "";
+constexpr const char* MQTT_PASS = "";
+#endif
 constexpr const char* TOPIC_ROOT = "smartfeeder";  // топіки: smartfeeder/<DEVICE_ID>/<subtopic>
 constexpr unsigned long WIFI_RETRY_MS = 30000;
 constexpr unsigned long MQTT_RETRY_MS = 5000;

@@ -1,6 +1,8 @@
 # Секрети (токен бота, chat_id) — ніколи не комітити
 .env
 *.env
+# Пароль брокера для прошивки (шаблон: src/secrets.example.h)
+src/secrets.h
 
 __pycache__/
 

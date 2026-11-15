@@ -2,13 +2,16 @@
 
 #include <PubSubClient.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <WiFiManager.h>
 
+#include "ca_certs.h"
 #include "config.h"
 
 namespace {
-WiFiClient wifiClient;
-PubSubClient mqtt(wifiClient);
+WiFiClient plainClient;
+WiFiClientSecure tlsClient;  // шифроване з'єднання з перевіркою сертифіката брокера
+PubSubClient mqtt;
 Net::MessageHandler messageHandler = nullptr;
 void (*portalCallback)() = nullptr;
 String topicPrefix;  // "smartfeeder/<DEVICE_ID>/"
@@ -38,14 +41,22 @@ void maintainMqtt() {
   if (millis() - lastAttempt < Config::MQTT_RETRY_MS) return;
   lastAttempt = millis();
 
-  Serial.print("Connecting MQTT...");
-  if (mqtt.connect(Config::DEVICE_ID)) {
+  Serial.printf("Connecting MQTT %s:%u (%s)...", Config::MQTT_SERVER, Config::MQTT_PORT,
+                Config::MQTT_USE_TLS ? "TLS" : "plain");
+  bool ok = Config::MQTT_USER[0] ? mqtt.connect(Config::DEVICE_ID, Config::MQTT_USER, Config::MQTT_PASS)
+                                 : mqtt.connect(Config::DEVICE_ID);
+  if (ok) {
     Serial.println("connected");
     mqtt.subscribe((topicPrefix + "cmd").c_str());
     mqtt.subscribe((topicPrefix + "bot").c_str());
   } else {
+    // rc=-2: немає з'єднання (адреса, порт, TLS); rc=4: неправильний логін/пароль; rc=5: немає дозволу
     Serial.print("failed rc=");
     Serial.println(mqtt.state());
+    if (Config::MQTT_USE_TLS) {
+      char err[100];
+      if (tlsClient.lastError(err, sizeof(err)) != 0) Serial.printf("TLS error: %s\n", err);
+    }
   }
 }
 }  // namespace
@@ -86,6 +97,12 @@ bool connectWifi(void (*onPortalStart)()) {
 void beginMqtt(MessageHandler handler) {
   messageHandler = handler;
   topicPrefix = String(Config::TOPIC_ROOT) + "/" + Config::DEVICE_ID + "/";
+  if (Config::MQTT_USE_TLS) {
+    tlsClient.setCACert(MQTT_CA_CERTS);
+    mqtt.setClient(tlsClient);
+  } else {
+    mqtt.setClient(plainClient);
+  }
   mqtt.setServer(Config::MQTT_SERVER, Config::MQTT_PORT);
   mqtt.setBufferSize(512);  // стандартних 256 байт замало для JSON із запасом
   mqtt.setCallback(onMqttMessage);

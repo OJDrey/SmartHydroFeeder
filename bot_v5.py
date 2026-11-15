@@ -30,6 +30,11 @@ TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 DEVICE_ID = os.environ.get("DEVICE_ID", "device123")
 MQTT_SERVER = os.environ.get("MQTT_SERVER", "broker.hivemq.com")
+MQTT_USERNAME = os.environ.get("MQTT_USERNAME", "")
+MQTT_PASSWORD = os.environ.get("MQTT_PASSWORD", "")
+# Хмарний брокер з логіном працює через TLS (8883); відкритий — без шифрування (1883)
+MQTT_TLS = os.environ.get("MQTT_TLS", "1" if MQTT_USERNAME else "0") == "1"
+MQTT_PORT = int(os.environ.get("MQTT_PORT", "8883" if MQTT_TLS else "1883"))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(BASE_DIR, "smarthydrofeeder.db"))
 
 if not TOKEN or not CHAT_ID:
@@ -156,6 +161,11 @@ SUBTOPICS = ("measure", "alert", "error", "setting", "refill")
 
 
 def on_connect(client, userdata, flags, rc, properties=None):  # сигнатура підходить і для paho 1.x, і для 2.x
+    failed = rc.is_failure if hasattr(rc, "is_failure") else rc != 0  # paho 2.x: ReasonCode, 1.x: int
+    if failed:
+        # Найчастіше: неправильний логін/пароль або облікові дані без дозволу на топіки
+        log.error("MQTT відмовив у підключенні: %s", rc)
+        return
     log.info("MQTT connected: %s", rc)
     # Старі версії прошивки і бота публікували retained-повідомлення, і брокер досі віддає їх
     # кожному новому підписнику. Порожнє retained-повідомлення видаляє збережену копію.
@@ -220,7 +230,13 @@ def on_message(client, userdata, msg):
 
 client.on_connect = on_connect
 client.on_message = on_message
-client.connect(MQTT_SERVER, 1883, 60)
+if MQTT_USERNAME:
+    client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
+if MQTT_TLS:
+    # Сертифікат брокера перевіряється за системним сховищем кореневих сертифікатів
+    client.tls_set()
+log.info("MQTT %s:%d (%s)", MQTT_SERVER, MQTT_PORT, "TLS" if MQTT_TLS else "без шифрування")
+client.connect(MQTT_SERVER, MQTT_PORT, 60)
 client.loop_start()
 
 
