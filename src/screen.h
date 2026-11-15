@@ -12,8 +12,9 @@ bool begin();
 Mode mode();
 
 void showMain();
-void showSettings(unsigned long timeoutMs = Config::SETTINGS_SCREEN_MS);
+void showSettings(const SensorParam& param, unsigned long timeoutMs = Config::SETTINGS_SCREEN_MS);
 void showReading(const LevelReading& reading);
+void showMessage(const char* title, const char* line);  // коротке повідомлення на 5 с
 void showLowWater(float percent);
 void showSensorError(const char* sensorName, const char* reason);
 void showError(const char* message);  // тимчасове повідомлення поверх будь-якого екрана

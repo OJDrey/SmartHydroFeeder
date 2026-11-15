@@ -55,25 +55,40 @@ void showMain() {
   oled.display();
 }
 
-void showSettings(unsigned long timeoutMs) {
+void showSettings(const SensorParam& param, unsigned long timeoutMs) {
   currentMode = Mode::Settings;
   beginText();
   oled.println("SETTINGS");
-  oled.printf("Height: %.1f cm\n", settings.heightCm);
+  oled.printf("%s: %.0f %s\n", param.label, *param.value, param.unit);
   oled.printf("Interval: %.1f min\n", settings.intervalMs / 60000.0f);
   oled.printf("Auto: %s\n", settings.autoEnabled ? "ON" : "OFF");
   oled.println();
-  oled.println("Short: +1cm");
-  oled.println("Double: -1cm");
+  oled.printf("Short: +%.0f %s\n", param.step, param.unit);
+  oled.printf("Double: -%.0f %s\n", param.step, param.unit);
   oled.display();
   settingsUntil = millis() + timeoutMs;
 }
 
 void showReading(const LevelReading& reading) {
   beginText();
-  if (!isnan(reading.distanceCm)) oled.printf("Dist: %.1f cm\n", reading.distanceCm);
-  oled.printf("Height: %.1f cm\n", settings.heightCm);
+  if (!isnan(reading.distanceCm)) {
+    oled.printf("Dist: %.1f cm\n", reading.distanceCm);
+    oled.printf("Height: %.1f cm\n", settings.heightCm);
+  }
+  if (!isnan(reading.volumeMl)) {
+    oled.printf("Water: %.0f ml\n", reading.volumeMl);
+    oled.printf("Bottle: %.0f ml\n", settings.capacityMl);
+  }
   oled.printf("Fill: %.1f %%\n", reading.percent);
+  oled.display();
+  showDataScreen();
+}
+
+void showMessage(const char* title, const char* line) {
+  beginText();
+  oled.println(title);
+  oled.println();
+  oled.println(line);
   oled.display();
   showDataScreen();
 }

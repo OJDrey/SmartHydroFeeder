@@ -16,6 +16,9 @@ unsigned long lastBotErrorAt = 0;
 bool waitingForDouble = false;
 unsigned long doubleClickDeadline = 0;
 
+// Ключі параметрів усіх датчиків: команду для іншого датчика відхиляємо з поясненням
+const char* const PARAM_KEYS[] = {"set_height", "set_capacity_ml"};
+
 // ---------- MQTT-повідомлення ----------
 
 void addHeader(JsonDocument& doc) {
@@ -25,9 +28,15 @@ void addHeader(JsonDocument& doc) {
 
 void addReading(JsonDocument& doc, const LevelReading& r) {
   addHeader(doc);
-  if (!isnan(r.distanceCm)) doc["dist_cm"] = r.distanceCm;
+  if (!isnan(r.distanceCm)) {
+    doc["dist_cm"] = r.distanceCm;
+    doc["height_cm"] = settings.heightCm;
+  }
+  if (!isnan(r.volumeMl)) {
+    doc["volume_ml"] = r.volumeMl;
+    doc["capacity_ml"] = settings.capacityMl;
+  }
   doc["level_percent"] = r.percent;
-  doc["height_cm"] = settings.heightCm;
   doc["low_water"] = r.percent < Config::LOW_WATER_PERCENT;
   doc["interval_min"] = settings.intervalMs / 60000.0f;
 }
@@ -39,10 +48,10 @@ void publishError(const char* message) {
   Net::publish("error", doc);
 }
 
-void publishHeightChange() {
+void publishParam(const SensorParam& p) {
   JsonDocument doc;
   addHeader(doc);
-  doc["set_height"] = settings.heightCm;
+  doc[p.key] = *p.value;
   Net::publish("setting", doc);
 }
 
@@ -68,12 +77,14 @@ void blinkLed() {
   digitalWrite(Pins::LED, LOW);
 }
 
-void changeHeight(float deltaCm) {
-  settings.heightCm = constrain(settings.heightCm + deltaCm, Config::HEIGHT_MIN_CM, Config::HEIGHT_MAX_CM);
+// Кнопка в меню налаштувань: direction = +1 або -1 крок
+void stepParam(int direction) {
+  SensorParam p = sensor->param();
+  *p.value = constrain(*p.value + direction * p.step, p.min, p.max);
   saveSettings();
-  Serial.printf("Height changed: %.1f cm\n", settings.heightCm);
-  Screen::showSettings();
-  publishHeightChange();
+  Serial.printf("%s changed: %.1f %s\n", p.label, *p.value, p.unit);
+  Screen::showSettings(p);
+  publishParam(p);
 }
 
 void checkBot(unsigned long now) {
@@ -92,6 +103,56 @@ void logStatus(unsigned long now) {
                 botLastSeen == 0 ? 0UL : now - botLastSeen);
 }
 
+// ---------- Команди з Telegram ----------
+
+bool handleParamCommand(JsonDocument& doc) {
+  SensorParam p = sensor->param();
+  bool changed = false;
+  for (const char* key : PARAM_KEYS) {
+    if (doc[key].isNull()) continue;
+    if (strcmp(key, p.key) != 0) {
+      publishError("This setting is not used by the installed sensor");
+      continue;
+    }
+    float v = doc[key].as<float>();
+    if (v >= p.min && v <= p.max) {
+      *p.value = v;
+      Serial.printf("%s updated via MQTT: %.1f %s\n", p.label, v, p.unit);
+      changed = true;
+    } else {
+      publishError("Setting value out of range");
+    }
+  }
+  return changed;
+}
+
+void handleTare() {
+  if (!sensor->tare()) {
+    publishError("Tare failed (not supported or sensor not responding)");
+    return;
+  }
+  saveSettings();
+  JsonDocument doc;
+  addHeader(doc);
+  doc["tare"] = "ok";
+  Net::publish("setting", doc);
+  Screen::showMessage("TARE DONE", "Empty bottle = 0 ml");
+}
+
+void handleCalibrate(float knownGrams) {
+  if (!sensor->calibrate(knownGrams)) {
+    publishError("Calibration failed (tare first, then put a known weight)");
+    return;
+  }
+  saveSettings();
+  JsonDocument doc;
+  addHeader(doc);
+  doc["calibrated_g"] = knownGrams;
+  doc["scale_factor"] = settings.scaleFactor;
+  Net::publish("setting", doc);
+  Screen::showMessage("CALIBRATED", "Scale factor saved");
+}
+
 void handleCommand(const uint8_t* payload, unsigned int length) {
   JsonDocument doc;
   if (deserializeJson(doc, payload, length)) {
@@ -99,18 +160,7 @@ void handleCommand(const uint8_t* payload, unsigned int length) {
     return;
   }
 
-  bool changed = false;
-
-  if (!doc["set_height"].isNull()) {
-    float h = doc["set_height"].as<float>();
-    if (h >= Config::HEIGHT_MIN_CM && h <= Config::HEIGHT_MAX_CM) {
-      settings.heightCm = h;
-      Serial.printf("Height updated via MQTT: %.1f cm\n", h);
-      changed = true;
-    } else {
-      publishError("Invalid set_height value received");
-    }
-  }
+  bool changed = handleParamCommand(doc);
 
   if (!doc["auto_enabled"].isNull()) {
     settings.autoEnabled = doc["auto_enabled"].as<bool>();
@@ -129,9 +179,11 @@ void handleCommand(const uint8_t* payload, unsigned int length) {
 
   if (changed) {
     saveSettings();
-    Screen::showSettings(Config::SETTINGS_SCREEN_AFTER_MQTT_MS);
+    Screen::showSettings(sensor->param(), Config::SETTINGS_SCREEN_AFTER_MQTT_MS);
   }
 
+  if (doc["tare"] == true) handleTare();
+  if (!doc["calibrate_g"].isNull()) handleCalibrate(doc["calibrate_g"].as<float>());
   if (doc["measure"] == true) Feeder::measure(false);
 }
 }  // namespace
@@ -158,7 +210,7 @@ void measure(bool isAuto) {
     return;
   }
 
-  Serial.printf("Measure: Dist=%.1f cm, Fill=%.1f %% (isAuto=%d)\n", r.distanceCm, r.percent, isAuto);
+  Serial.printf("Measure: Fill=%.1f %% (isAuto=%d)\n", r.percent, isAuto);
   bool low = r.percent < Config::LOW_WATER_PERCENT;
 
   if (isAuto) {
@@ -185,7 +237,7 @@ void onButton(ButtonEvent event, unsigned long now) {
   if (event == ButtonEvent::LongPress) {
     waitingForDouble = false;
     if (inSettings) Screen::showMain();
-    else Screen::showSettings();
+    else Screen::showSettings(sensor->param());
     return;
   }
 
@@ -194,13 +246,13 @@ void onButton(ButtonEvent event, unsigned long now) {
     return;
   }
 
-  // У налаштуваннях: одне натискання +1 см, подвійне -1 см
+  // У налаштуваннях: одне натискання +крок, подвійне -крок
   if (!waitingForDouble) {
     waitingForDouble = true;
     doubleClickDeadline = now + Config::DOUBLE_CLICK_MS;
   } else {
     waitingForDouble = false;
-    changeHeight(-1.0f);
+    stepParam(-1);
   }
 }
 
@@ -219,7 +271,7 @@ void loop(unsigned long now) {
   // Друге натискання не прийшло вчасно: це було одинарне
   if (waitingForDouble && (long)(now - doubleClickDeadline) >= 0) {
     waitingForDouble = false;
-    if (Screen::mode() == Screen::Mode::Settings) changeHeight(+1.0f);
+    if (Screen::mode() == Screen::Mode::Settings) stepParam(+1);
   }
 
   if (settings.autoEnabled && now - lastMeasure >= settings.intervalMs) measure(true);

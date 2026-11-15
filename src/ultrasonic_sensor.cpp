@@ -2,8 +2,12 @@
 
 #include "config.h"
 
-UltrasonicSensor::UltrasonicSensor(uint8_t trigPin, uint8_t echoPin, const float& heightCm)
+UltrasonicSensor::UltrasonicSensor(uint8_t trigPin, uint8_t echoPin, float& heightCm)
     : trigPin_(trigPin), echoPin_(echoPin), heightCm_(heightCm) {}
+
+SensorParam UltrasonicSensor::param() {
+  return {"set_height", "Height", "cm", &heightCm_, 1.0f, Config::HEIGHT_MIN_CM, Config::HEIGHT_MAX_CM};
+}
 
 void UltrasonicSensor::begin() {
   pinMode(trigPin_, OUTPUT);
@@ -26,6 +30,7 @@ LevelReading UltrasonicSensor::read() {
   LevelReading r;
   float d = measureDistanceCm();
   r.distanceCm = d;
+  Serial.printf("Ultrasonic: dist=%.1f cm\n", d);
 
   if (isnan(d)) {
     r.error = "No echo";

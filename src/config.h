@@ -9,6 +9,8 @@ constexpr uint8_t BUTTON = 25;  // кнопка на GND, INPUT_PULLUP
 constexpr uint8_t LED = 2;      // вбудований світлодіод
 constexpr uint8_t SDA = 26;     // OLED I2C
 constexpr uint8_t SCL = 27;
+constexpr uint8_t HX711_DT = 19;   // тензодатчик
+constexpr uint8_t HX711_SCK = 23;
 }  // namespace Pins
 
 namespace Config {
@@ -56,4 +58,20 @@ constexpr unsigned long STATUS_LOG_MS = 5000;
 constexpr unsigned long ULTRASONIC_TIMEOUT_US = 30000;
 constexpr float ULTRASONIC_MIN_CM = 2.0f;
 constexpr float ULTRASONIC_MAX_CM = 500.0f;
+
+// Ваги (HX711)
+constexpr float DEFAULT_CAPACITY_ML = 500.0f;
+constexpr float CAPACITY_MIN_ML = 50.0f;
+constexpr float CAPACITY_MAX_ML = 2000.0f;
+constexpr float CAPACITY_STEP_ML = 50.0f;
+constexpr uint8_t SCALE_SAMPLES = 5;                  // ~0,5 с при 10 вимірах/с
+constexpr unsigned long SCALE_READY_TIMEOUT_MS = 1000;
+constexpr float SCALE_REMOVED_G = 30.0f;              // нижче -30 г: пляшку зняли
+#ifdef WOKWI_SIM
+// HX711 у Wokwi (тип "5kg") видає 0..2100 на 0..5 кг, тобто 0,42 відліку на грам
+constexpr float DEFAULT_SCALE_FACTOR = 0.42f;
+#else
+// Орієнтовне значення; реальні ваги обов'язково калібрувати командою /calibrate
+constexpr float DEFAULT_SCALE_FACTOR = 420.0f;
+#endif
 }  // namespace Config

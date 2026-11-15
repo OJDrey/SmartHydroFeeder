@@ -4,6 +4,7 @@
 //   settings.*          налаштування в NVS
 //   level_sensor.h      інтерфейс датчика рівня
 //   ultrasonic_sensor.* HC-SR04
+//   scale_sensor.*      тензодатчик з HX711
 //   button.*            кнопка з антибрязкотом
 //   screen.*            екрани OLED
 //   net.*               Wi-Fi і MQTT
@@ -16,10 +17,16 @@
 #include "net.h"
 #include "screen.h"
 #include "settings.h"
-#include "ultrasonic_sensor.h"
 
-// Щоб перейти на тензодатчик, достатньо замінити цей об'єкт
+// Датчик рівня вибирається прапорцем збірки USE_SCALE_SENSOR (див. platformio.ini)
+#ifdef USE_SCALE_SENSOR
+#include "scale_sensor.h"
+static ScaleSensor levelSensor(Pins::HX711_DT, Pins::HX711_SCK, settings.scaleOffset, settings.scaleFactor,
+                               settings.capacityMl);
+#else
+#include "ultrasonic_sensor.h"
 static UltrasonicSensor levelSensor(Pins::TRIG, Pins::ECHO, settings.heightCm);
+#endif
 static Button button(Pins::BUTTON, Config::DEBOUNCE_MS, Config::LONG_PRESS_MS);
 
 // Кнопка, затиснута під час увімкнення і втримана 3 с, стирає збережену мережу Wi-Fi

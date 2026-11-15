@@ -34,6 +34,8 @@ def format_measure_message(j):
     dist = j.get("dist_cm", None)
     level = j.get("level_percent", None)
     height = j.get("height_cm", None)
+    volume = j.get("volume_ml", None)
+    capacity = j.get("capacity_ml", None)
     low = j.get("low_water", False)
     ts = j.get("timestamp", None)
     lines = []
@@ -42,6 +44,10 @@ def format_measure_message(j):
         lines.append(f"📏 Дистанція між водою та датчиком: {dist:.1f} cm")
     if height is not None:
         lines.append(f"📐 Висота пляшки: {height:.1f} cm")
+    if volume is not None:
+        lines.append(f"🥤 Води в пляшці: {volume:.0f} мл")
+    if capacity is not None:
+        lines.append(f"📐 Об'єм пляшки: {capacity:.0f} мл")
     if level is not None:
         lines.append(f"💧 Рівень заповнення: {level:.1f}%")
     if low:
@@ -55,6 +61,19 @@ def on_connect(client, userdata, flags, rc, properties=None):  # сигнату�
     client.subscribe(f"smartfeeder/{DEVICE_ID}/measure")
     client.subscribe(f"smartfeeder/{DEVICE_ID}/alert")
     client.subscribe(f"smartfeeder/{DEVICE_ID}/error")
+    client.subscribe(f"smartfeeder/{DEVICE_ID}/setting")
+
+def format_setting_message(j):
+    # Підтвердження від пристрою: що саме змінилося
+    if j.get("tare") == "ok":
+        return "⚖️ Тарування виконано: порожня пляшка = 0 мл"
+    if "calibrated_g" in j:
+        return f"⚖️ Ваги відкалібровано вантажем {j['calibrated_g']:.0f} г (коефіцієнт {j.get('scale_factor', 0):.4f})"
+    if "set_height" in j:
+        return f"⚙️ Висоту пляшки змінено: {j['set_height']:.0f} см"
+    if "set_capacity_ml" in j:
+        return f"⚙️ Об'єм пляшки змінено: {j['set_capacity_ml']:.0f} мл"
+    return None
 
 def on_message(client, userdata, msg):
     payload = msg.payload.decode()
@@ -81,6 +100,11 @@ def on_message(client, userdata, msg):
         else:
             # Ручний замір — звичайна тривога
             bot.send_message(CHAT_ID, "🚨 Тривога\n" + text)
+
+    elif msg.topic.endswith("/setting"):
+        text = format_setting_message(j)
+        if text:
+            bot.send_message(CHAT_ID, text)
 
     elif msg.topic.endswith("/error"):
         err = j.get("error", "Unknown error")
@@ -141,6 +165,29 @@ def interval_cmd(message):
         bot.reply_to(message, f"Інтервал встановлено: {m} хв")
     except:
         bot.reply_to(message, "Використання: /interval 10  (в хвилинах)")
+
+@bot.message_handler(commands=['capacity'])
+def capacity_cmd(message):
+    try:
+        ml = float(message.text.split()[1])
+        client.publish(f"smartfeeder/{DEVICE_ID}/cmd", json.dumps({"set_capacity_ml": ml}))
+        bot.reply_to(message, f"Запит надіслано: об'єм пляшки {ml:.0f} мл")
+    except (IndexError, ValueError):
+        bot.reply_to(message, "Використання: /capacity 500  (в мілілітрах)")
+
+@bot.message_handler(commands=['tare'])
+def tare_cmd(message):
+    client.publish(f"smartfeeder/{DEVICE_ID}/cmd", json.dumps({"tare": True}))
+    bot.reply_to(message, "Запит на тарування надіслано. На вагах має стояти ПОРОЖНЯ пляшка")
+
+@bot.message_handler(commands=['calibrate'])
+def calibrate_cmd(message):
+    try:
+        g = float(message.text.split()[1])
+        client.publish(f"smartfeeder/{DEVICE_ID}/cmd", json.dumps({"calibrate_g": g}))
+        bot.reply_to(message, f"Запит на калібрування надіслано: вантаж {g:.0f} г")
+    except (IndexError, ValueError):
+        bot.reply_to(message, "Використання: /calibrate 200  (вага вантажу в грамах; спершу /tare)")
 
 print("Telegram bot running")
 bot.polling()
