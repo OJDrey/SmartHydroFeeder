@@ -1,0 +1,15 @@
+{
+  "meta": {
+    "filename": "pe3.kicad_pro",
+    "version": 3
+  },
+  "schematic": {
+    "page_layout_descr_file": "gost_form2_pe3.kicad_wks"
+  },
+  "sheets": [
+    [
+      "a3e9c1d4-7b2f-4c8e-9f10-2d6b5e8a4c71",
+      "Root"
+    ]
+  ]
+}

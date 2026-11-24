@@ -1,0 +1,15 @@
+{
+  "meta": {
+    "filename": "smarthydrofeeder.kicad_pro",
+    "version": 3
+  },
+  "schematic": {
+    "page_layout_descr_file": "gost_form1.kicad_wks"
+  },
+  "sheets": [
+    [
+      "6f1c2a52-1d3e-4b8a-9d8e-5a1b7c3e2f10",
+      "Root"
+    ]
+  ]
+}

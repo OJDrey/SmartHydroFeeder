@@ -1,0 +1,4 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "SHF")(type "KiCad")(uri "${KIPRJMOD}/SHF.kicad_sym")(options "")(descr "Символи ЄСКД для SmartHydroFeeder"))
+)

@@ -18,7 +18,7 @@ constexpr uint8_t SCL = 27;
 constexpr uint8_t HX711_DT = 19;   // тензодатчик
 constexpr uint8_t HX711_SCK = 23;
 constexpr uint8_t PUMP = 33;       // затвор MOSFET IRLZ44N (з резистором 10 кОм на GND)
-constexpr uint8_t FLOAT_SW = 34;   // поплавок; GPIO34 без внутрішньої підтяжки, потрібна 10 кОм на 3V3
+constexpr uint8_t FLOAT_SW = 34;   // поплавок (розмикальний) на GND; GPIO34 без внутрішньої підтяжки, потрібна 10 кОм на 3V3
 constexpr uint8_t BUZZER = 4;      // активний зумер
 }  // namespace Pins
 
@@ -94,7 +94,9 @@ constexpr unsigned long REFILL_DRY_CHECK_MS = 10000;
 constexpr float REFILL_MIN_RISE_PERCENT = 1.0f;       // за 10 с рівень має зрости хоча б на 1 %
 constexpr unsigned long REFILL_COOLDOWN_MS = 10UL * 60UL * 1000UL;
 constexpr unsigned long REFILL_POLL_MS = 500;          // як часто міряти рівень під час доливу
-constexpr int FLOAT_ACTIVE_LEVEL = LOW;               // поплавок замикає на GND, коли вода вгорі
+constexpr int FLOAT_ACTIVE_LEVEL = HIGH;              // поплавок ZP2508 розмикальний: вода вгорі -> контакт
+                                                      // розімкнений, R5 тягне до 3V3. Обрив дроту теж = "повно",
+                                                      // тож насос зупиниться, а не переллє
 
 // Ваги (HX711)
 constexpr float DEFAULT_CAPACITY_ML = 500.0f;

@@ -40,8 +40,8 @@
     [ "r_pump:2", "esp:GND.1", "black", [] ],
 
     [ "float:2", "esp:34", "green", [] ],
-    [ "float:1", "esp:3V3", "red", [] ],
-    [ "float:3", "esp:GND.1", "black", [] ],
+    [ "float:1", "esp:GND.1", "black", [] ],
+    [ "float:3", "esp:3V3", "red", [] ],
 
     [ "buzzer:2", "esp:4", "orange", [] ],
     [ "buzzer:1", "esp:GND.1", "black", [] ]

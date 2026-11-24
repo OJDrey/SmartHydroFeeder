@@ -1,0 +1,9 @@
+# Службові файли KiCad
+*-backups/
+*.kicad_prl
+fp-info-cache
+*.lck
+_autosave-*
+erc.rpt
+*.net
+svg/
